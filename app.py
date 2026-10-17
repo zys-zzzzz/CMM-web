@@ -47,6 +47,30 @@ FORM_GROUPS = (
         ("triglycerides_mmolL", "甘油三酯（mmol/L）", None),
     )),
 )
+# Engineering input ranges, not clinical reference intervals. Values can be entered manually.
+SLIDER_SPECS = {
+    "age": (65, 112, 70, 1),
+    "height_cm": (100.0, 220.0, 165.0, 0.1),
+    "weight_kg": (20.0, 200.0, 65.0, 0.1),
+    "waist_cm": (40.0, 180.0, 85.0, 0.1),
+    "temperature": (34.0, 42.0, 36.5, 0.1),
+    "pulse": (30.0, 200.0, 70.0, 1.0),
+    "heart_rate": (30.0, 200.0, 70.0, 1.0),
+    "systolic": (60.0, 250.0, 130.0, 1.0),
+    "diastolic": (30.0, 150.0, 80.0, 1.0),
+    "left_naked_eye": (0.1, 2.0, 1.0, 0.1),
+    "right_naked_eye": (0.1, 2.0, 1.0, 0.1),
+    "HGB": (20.0, 250.0, 135.0, 1.0),
+    "PLT": (10.0, 1000.0, 250.0, 1.0),
+    "Creatinine": (10.0, 1500.0, 70.0, 1.0),
+    "Urea": (0.1, 60.0, 5.0, 0.1),
+    "TC": (0.1, 20.0, 4.5, 0.01),
+    "LDL_C": (0.01, 15.0, 2.5, 0.01),
+    "HDL_C": (0.01, 5.0, 1.2, 0.01),
+    "glucose_mmolL": (0.1, 40.0, 5.5, 0.01),
+    "triglycerides_mmolL": (0.1, 30.0, 1.5, 0.01),
+}
+
 LIFESTYLE_OPTIONS = {
     "饮酒情况": ("不补充", "不饮酒", "饮酒"),
     "日常身体活动": ("不补充", "较少活动", "有规律活动"),
@@ -289,7 +313,9 @@ version = state["version"]
 if mode == "personal":
     st.subheader("👤 个人风险评估")
     st.write("请参照近期体检报告填写。完成后一次提交，获取本人的风险结果和健康建议。")
-    st.info("需要填写28项模型数据，包含血糖、血脂等化验指标。没有检查结果时请先做健康咨询，不要猜填或填0。")
+    st.info("拖动滑块填写数值，性别与疾病史点击选择。起始值只是操作示例，不是您的检查结果；请按报告逐项核对，没有结果时不要猜填。")
+    st.caption("滑块范围仅用于录入，不是医学正常范围。真实数值超出范围或需要更高精度时，请切换精确输入，不要硬填到端点。")
+    precise_input = st.toggle("切换为精确手动输入", value=False, key=f"precise-input-{version}")
     with st.form(f"personal-form-{version}"):
         values = {}
         for group, fields in FORM_GROUPS:
@@ -306,15 +332,22 @@ if mode == "personal":
                         help_text = "运动功能编码并非运动频次。" if field == "exercise" else None
                         if field in ("left_naked_eye", "right_naked_eye"):
                             help_text = "填写小数视力，如1.0，不能直接填4.9等对数视力。"
-                        values[field] = st.number_input(label, min_value=0 if field == "age" else 0.0,
-                            value=None, step=1 if field == "age" else 0.1,
-                            placeholder="按报告填写", help=help_text, key=key)
+                        if precise_input:
+                            values[field] = st.number_input(label, min_value=0 if field == "age" else 0.0,
+                                value=None, step=1 if field == "age" else 0.01,
+                                placeholder="按报告填写", help=help_text, key=key + "-exact")
+                        else:
+                            low, high, initial, step = SLIDER_SPECS[field]
+                            values[field] = st.slider(label, min_value=low, max_value=high,
+                                value=initial, step=step, format="%d" if field == "age" else "%.2f",
+                                help=help_text, key=key + "-slider")
             if group == "视力与功能":
                 st.caption("运动功能是功能状态，并非每周运动次数；脉搏和心率均为原模型必需字段。")
         st.markdown("#### 生活方式补充（可选，仅用于建议）")
         lifestyle = {}
         for label, options in LIFESTYLE_OPTIONS.items():
             lifestyle[label] = st.selectbox(label, options, key=f"lifestyle-{version}-{label}")
+        confirmed_values = st.checkbox("我已按实际报告逐项核对所有数值，包括没有拖动过的滑块起始值；没有用示例值代替未知检查结果。", key=f"person-values-confirmed-{version}")
         consent = st.checkbox("我同意将本次28项表单数据经私有OSS交给百炼Skill计算，并将本人表单、补充信息及计算结果提供给百炼模型，用于本次风险解释和个人健康建议。", key=f"person-consent-{version}")
         submitted = st.form_submit_button("📊 计算我的风险并生成健康建议", type="primary", use_container_width=True)
     if submitted:
@@ -322,6 +355,8 @@ if mode == "personal":
             state["manifest"] = None
             if not consent:
                 raise InputError("请先阅读并勾选本次数据处理同意，未同意不会上传或发起计算。")
+            if not confirmed_values:
+                raise InputError("请先按实际报告核对所有数值并勾选确认，不能直接用滑块示例值计算。")
             require_api()
             data, records = personal_csv(values)
             plan, bundle = graph_bundle(data)
