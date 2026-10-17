@@ -1,4 +1,4 @@
-"""Candidate SESSION_FILE transport; no model inference and no health-data logging."""
+"""Validate model fields and transfer the raw CSV via a short-lived private URL."""
 import base64
 import csv
 import hashlib
@@ -7,6 +7,7 @@ import json
 import math
 import re
 import time
+import hmac
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -129,12 +130,8 @@ def safe_tag(value):
 
 
 class UploadError(RuntimeError):
-    def __init__(self, stage, status=None, code=None, request_id=None):
-        self.stage = stage
-        self.status = status
-        self.code = safe_tag(code)
-        self.request_id = safe_tag(request_id)
-        super().__init__(f"{stage}未完成；HTTP={status or '-'}；code={self.code}；request_id={self.request_id}")
+    def __init__(self, stage, code="unknown", request_id=None):
+        super().__init__(f"{stage}未完成；code={safe_tag(code)}；request_id={safe_tag(request_id)}")
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -142,95 +139,77 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-class FileClient:
-    def __init__(self, api_key, workspace, opener=None):
-        if not re.fullmatch(r"[A-Za-z0-9-]+", workspace or ""):
-            raise InputError("请在Secrets填写有效的BAILIAN_UPLOAD_WORKSPACE_ID。")
-        self.base = f"https://{workspace}.cn-beijing.maas.aliyuncs.com/api/v1/connector/dash/"
-        self.api_key = api_key
+class SignedFileClient:
+    def __init__(self, config, bucket_factory=None, opener=None):
+        names = ("OSS_BUCKET", "OSS_ENDPOINT", "OSS_ACCESS_KEY_ID", "OSS_ACCESS_KEY_SECRET")
+        if any(not config.get(name) for name in names):
+            raise InputError("请管理员补齐Secrets中的OSS_BUCKET、OSS_ENDPOINT、OSS_ACCESS_KEY_ID和OSS_ACCESS_KEY_SECRET。")
+        bucket = config["OSS_BUCKET"]
+        if re.fullmatch(r"[a-z0-9][a-z0-9-]{1,61}[a-z0-9]", bucket) is None:
+            raise InputError("OSS_BUCKET名称格式不正确。")
+        if config["OSS_ENDPOINT"].rstrip("/") != "https://oss-cn-beijing.aliyuncs.com":
+            raise InputError("本修复版使用北京OSS，请填写https://oss-cn-beijing.aliyuncs.com。")
+        if bucket_factory is None:
+            import oss2
+            bucket_factory = lambda: oss2.Bucket(oss2.Auth(config["OSS_ACCESS_KEY_ID"], config["OSS_ACCESS_KEY_SECRET"]), config["OSS_ENDPOINT"], bucket)
+        self.bucket_factory = bucket_factory
+        self.host = bucket + ".oss-cn-beijing.aliyuncs.com"
         self.opener = opener or urllib.request.build_opener(NoRedirect())
 
-    def _json(self, operation, body):
-        stage = {"applyFileUploadLease": "申请上传地址", "addFile": "注册会话文件", "describeFile": "检查文件状态"}[operation]
-        request = urllib.request.Request(self.base + operation, method="POST",
-            data=json.dumps(body).encode(), headers={"Authorization": "Bearer " + self.api_key, "Content-Type": "application/json"})
+    def upload(self, data, count):
+        if not 1 <= len(data) <= MAX_BYTES or type(count) is not int or not 1 <= count <= MAX_ROWS:
+            raise InputError("输入大小或记录数不正确。")
+        digest = hashlib.sha256(data).hexdigest()
+        key = "cmm-input/" + uuid.uuid4().hex + ".csv"
         try:
-            with self.opener.open(request, timeout=60) as response:
-                result = json.load(response)
-        except urllib.error.HTTPError as exc:
-            try:
-                error = json.loads(exc.read(65536))
-            except (ValueError, OSError):
-                error = {}
-            if not isinstance(error, dict):
-                error = {}
-            raise UploadError(stage, exc.code, error.get("code"), error.get("requestId") or error.get("request_id")) from None
-        except (OSError, ValueError):
-            raise UploadError(stage, code="NetworkOrResponseError") from None
-        if not isinstance(result, dict):
-            raise UploadError(stage, code="UnexpectedResponse")
-        if result.get("code") != "Success" or str(result.get("status", result.get("status_code", 200))) != "200":
-            raise UploadError(stage, code=result.get("code"), request_id=result.get("requestId"))
-        if not isinstance(result.get("data"), dict):
-            raise UploadError(stage, code="MissingData")
-        return result["data"]
-
-    def upload(self, data):
-        # CSV is plain text. A .txt transport name uses a documented upload format;
-        # the host must feed these exact CSV bytes to Skill with --format csv.
-        lease = self._json("applyFileUploadLease", {"category": "default", "categoryType": "SESSION_FILE",
-            "fileName": "cmm_" + uuid.uuid4().hex + ".txt", "sizeBytes": str(len(data)),
-            "contentMd5": base64.b64encode(hashlib.md5(data).digest()).decode()})
-        param = lease.get("param", {})
-        url = param.get("url", "")
+            bucket = self.bucket_factory()
+            bucket.put_object(key, data, headers={"Content-Type": "text/csv; charset=utf-8"})
+            url = bucket.sign_url("GET", key, 900, slash_safe=True)
+        except Exception as exc:
+            raise UploadError("上传私有文件", getattr(exc, "code", "UploadFailed"), getattr(exc, "request_id", None)) from None
         parsed = urllib.parse.urlsplit(url)
-        host = parsed.hostname or ""
-        # Never forward the API key to the presigned upload destination.
-        if parsed.scheme != "https" or not host.endswith(".aliyuncs.com") or parsed.username or parsed.password or parsed.port not in (None, 443) or param.get("method") != "PUT":
-            raise UploadError("检查上传地址", code="UnexpectedUploadDestination")
-        upload_headers = dict(param.get("headers", {}))
-        if any(name.lower() in {"authorization", "proxy-authorization", "host"} for name in upload_headers):
-            raise UploadError("检查上传地址", code="UnexpectedUploadHeaders")
-        request = urllib.request.Request(url, data=data, method="PUT", headers=upload_headers)
+        if parsed.scheme != "https" or parsed.hostname != self.host or parsed.port not in (None, 443) or parsed.username or parsed.password:
+            raise UploadError("检查下载链接", "UnexpectedDestination")
         try:
-            with self.opener.open(request, timeout=120) as response:
-                if response.status not in (200, 201, 204):
-                    raise UploadError("传输文件", response.status)
-        except urllib.error.HTTPError as exc:
-            raise UploadError("传输文件", exc.code) from None
-        except OSError:
-            raise UploadError("传输文件", code="NetworkError") from None
-        lease_id = lease.get("leaseId") or lease.get("fileUploadLeaseId")
-        if not lease_id:
-            raise UploadError("注册会话文件", code="MissingLeaseId")
-        added = self._json("addFile", {"leaseId": lease_id, "category": "default", "categoryType": "SESSION_FILE", "parser": "AUTO_SELECT"})
-        file_id = added.get("fileId", "")
-        if not re.fullmatch(r"file_session_[A-Za-z0-9_-]+", file_id):
-            raise UploadError("注册会话文件", code="ExpectedSessionFileId")
-        return file_id
-
-    def status(self, file_id):
-        result = self._json("describeFile", {"fileId": file_id})
-        status = result.get("status")
-        if status in ("PARSE_SUCCESS", "FILE_IS_READY"):
-            return True
-        if status in ("FAIL", "PARSE_FAILED", "FILE_PARSE_FAILED"):
-            raise UploadError("解析会话文件", code="FileParseFailed")
-        return False
+            request = urllib.request.Request(url, method="GET", headers={"Accept-Encoding": "identity"})
+            with self.opener.open(request, timeout=45) as response:
+                if response.status != 200:
+                    raise UploadError("核对下载文件", "UnexpectedStatus")
+                downloaded = response.read(MAX_BYTES + 1)
+        except UploadError:
+            raise
+        except Exception:
+            raise UploadError("核对下载链接", "DownloadFailed") from None
+        if len(downloaded) != len(data) or not hmac.compare_digest(hashlib.sha256(downloaded).hexdigest(), digest):
+            raise UploadError("核对文件完整性", "HashOrSizeMismatch")
+        return {"url": url, "sha256": digest, "bytes": len(data), "records": count}
 
 
-def conversation_body(prompt, session_id=None, file_id=None):
+def link_expired(manifest, now=None):
+    try:
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(manifest["url"]).query)
+        return int(query["Expires"][0]) <= int(time.time() if now is None else now) + 30
+    except (KeyError, ValueError, TypeError, IndexError):
+        return True
+
+
+def conversation_body(prompt, session_id=None, manifest=None):
     input_data = {"prompt": prompt}
     if session_id:
         input_data["session_id"] = session_id
-    parameters = {}
-    if file_id:
-        parameters["session_file_ids"] = [file_id]
-        input_data["prompt"] = prompt + (
-            "\n\n本次附有用户授权的体检表，传输格式为UTF-8 CSV纯文本（文件名后缀为.txt）。"
-            "请由宿主定位本次附件的原始沙箱文件，按CMM Skill v1.2的init/stage/run流程计算，stage使用--format csv。"
-            "不要读取或打印整表，不把原始数据或逐人结果发送到任何MCP。"
-            "如果当前API未把附件提供为可用的原始沙箱文件，请明确回复‘未获得原始附件，尚未执行CMM计算’，"
-            "不得根据解析文本重建表格、心算概率或声称计算完成。仅真实完成后报告处理条数和文件交付情况。"
+    if manifest:
+        if link_expired(manifest):
+            raise InputError("文件链接已过期或即将过期，请重新点击准备并上传。")
+        input_data["file_list"] = [manifest["url"]]
+        input_data["prompt"] += (
+            "\n\n本次CMM计算的cmm_transfer_manifest如下，仅为本次私有文件传输清单，不含体检表内容：\n"
+            + json.dumps(manifest, ensure_ascii=False, separators=(",", ":"))
+            + "\n请调用cmm-risk-assessment的v1.3受限链接入口：在技能目录执行python3 scripts/fetch_and_run.py，"
+            "将上面四字段JSON通过引号保护的heredoc送入标准输入。不要寻找file_session或假定原始附件已挂载。"
+            "不要扫描系统目录、遍历环境变量、打印完整体检表或结果；不得将链接、清单或个人数据发送到Neo4j MCP。"
+            "不要修改CMM_FILE_HOST或跳过校验。只有脚本确实返回completed才报告计算完成；"
+            "如果报错，原样报告固定错误码，不凭解析文本重建表格或猜测结果。"
+            "计算成功后，使用宿主已授权的download_file仅导出该任务返回的result.csv，并提供真实下载链接。"
         )
-    return {"input": input_data, "parameters": parameters}
+    return {"input": input_data, "parameters": {}}
+

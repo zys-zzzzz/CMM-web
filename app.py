@@ -7,7 +7,7 @@ import urllib.request
 
 import streamlit as st
 
-from upload_support import FileClient, InputError, UploadError, conversation_body, prepare_table, sheet_names
+from upload_support import SignedFileClient, InputError, UploadError, conversation_body, prepare_table, sheet_names
 
 
 def setting(name):
@@ -29,7 +29,7 @@ def show_answer(answer):
         st.markdown(answer)
 
 
-st.set_page_config(page_title="CMM · 个人健康助手", page_icon="🌿", layout="wide", initial_sidebar_state="auto")
+st.set_page_config(page_title="筑梦健康毕节 · CMM个人健康助手", page_icon="🌿", layout="wide", initial_sidebar_state="auto")
 st.markdown("""
 <style>
 :root { --cmm-teal:#0f766e; --cmm-ink:#173334; --cmm-muted:#597170; }
@@ -98,14 +98,15 @@ html, body, .stApp, .stApp p, .stApp h1, .stApp label, .stApp button, .stApp tex
 </style>
 """, unsafe_allow_html=True)
 
-defaults = {"messages": [], "session_id": None, "file_id": None, "file_ready": False,
+defaults = {"messages": [], "session_id": None, "file_manifest": None, "file_ready": False,
     "file_sent": False, "rows": 0, "uploader_version": 0}
+request_calculation = False
 for key, value in defaults.items():
     if key not in st.session_state:
         st.session_state[key] = value
 
 with st.sidebar:
-    st.markdown('<div class="cmm-brand"><div class="cmm-logo">🌿</div><div><div class="cmm-brand-name">CMM 健康助手</div><div class="cmm-brand-sub">PERSONAL HEALTH COMPANION</div></div></div>', unsafe_allow_html=True)
+    st.markdown('<div class="cmm-brand"><div class="cmm-logo">🌿</div><div><div class="cmm-brand-name">筑梦健康毕节</div><div class="cmm-brand-sub">CMM 个人健康助手</div></div></div>', unsafe_allow_html=True)
     if st.button("＋  开始新对话", use_container_width=True):
         version = st.session_state.uploader_version + 1
         for key, value in defaults.items():
@@ -113,7 +114,7 @@ with st.sidebar:
         st.session_state.uploader_version = version
         st.rerun()
     st.divider()
-    st.markdown('<div class="cmm-side-title">📎 上传体检数据</div><div class="cmm-side-note">选择数据表，准备好后在右侧发送评估要求。<br>支持 CSV / Excel（.xlsx） · 最大 5 MiB</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cmm-side-title">📎 上传体检数据</div><div class="cmm-side-note">选择数据表，上传后点击“开始 CMM 计算”。<br>支持 CSV / Excel（.xlsx） · 最大 5 MiB</div>', unsafe_allow_html=True)
     uploaded = st.file_uploader("选择体检数据表", type=["csv", "xlsx"], key=f"upload-{st.session_state.uploader_version}", label_visibility="collapsed")
     selected_sheet = None
     excel_ok = True
@@ -125,55 +126,37 @@ with st.sidebar:
             st.error("Excel读取失败，请确认是有效的.xlsx文件或另存为CSV。")
     consent = st.checkbox("我同意将表格中用于 CMM 计算的28项数据发送至百炼处理。", key=f"consent-{st.session_state.uploader_version}")
     if st.button("↑  准备并上传", type="primary", use_container_width=True, disabled=uploaded is None or not consent or not excel_ok):
-        st.session_state.file_id = None
+        st.session_state.file_manifest = None
         st.session_state.file_ready = False
         st.session_state.file_sent = False
         st.session_state.rows = 0
         try:
-            api_key = setting("DASHSCOPE_API_KEY")
-            workspace = setting("BAILIAN_UPLOAD_WORKSPACE_ID") or setting("DASHSCOPE_WORKSPACE_ID")
-            if not api_key or not workspace:
-                raise InputError("请管理员在Secrets填写BAILIAN_UPLOAD_WORKSPACE_ID，保留现有百炼API Key。")
             with st.spinner("正在检查并上传…"):
                 data, count = prepare_table(uploaded.getvalue(), Path(uploaded.name).suffix.lower(), selected_sheet)
-                client = FileClient(api_key, workspace)
-                file_id = client.upload(data)
-                st.session_state.file_id = file_id
+                client = SignedFileClient({name: setting(name) for name in ("OSS_BUCKET", "OSS_ENDPOINT", "OSS_ACCESS_KEY_ID", "OSS_ACCESS_KEY_SECRET")})
+                manifest = client.upload(data, count)
+                st.session_state.file_manifest = manifest
                 st.session_state.rows = count
-                st.session_state.file_ready = client.status(file_id)
-            if st.session_state.file_ready:
-                st.success(f"已上传 {count} 条数据。风险计算尚未确认完成。")
-            else:
-                st.info("文件已上传，仍在处理中，请稍后检查文件状态。")
+                st.session_state.file_ready = True
+            st.success(f"已准备 {count} 条数据，并核对了文件完整性。请点击开始 CMM 计算。")
         except (InputError, UploadError) as exc:
             st.error(str(exc))
         except Exception:
             st.error("准备文件未完成，未发送聊天请求。请检查表格格式和应用依赖。")
-    if st.session_state.file_id and not st.session_state.file_ready:
-        if st.button("↻  检查文件状态", use_container_width=True):
-            try:
-                client = FileClient(setting("DASHSCOPE_API_KEY"), setting("BAILIAN_UPLOAD_WORKSPACE_ID") or setting("DASHSCOPE_WORKSPACE_ID"))
-                st.session_state.file_ready = client.status(st.session_state.file_id)
-                if st.session_state.file_ready:
-                    st.success("文件已就绪，可以发送评估要求。")
-                else:
-                    st.info("文件仍在处理中，请稍后再检查。")
-            except (InputError, UploadError) as exc:
-                st.error(str(exc))
+    request_calculation = st.button("▶  开始 CMM 计算", use_container_width=True,
+        disabled=not st.session_state.file_ready or st.session_state.file_sent)
     if st.session_state.file_ready:
         state = f"📄 已上传 {st.session_state.rows} 条数据<br>计算状态：以实际工具执行结果为准"
-    elif st.session_state.file_id:
-        state = "⏳ 文件处理中<br>尚未执行风险计算"
     else:
         state = "💬 可直接进行健康咨询<br>需要计算时，再上传体检数据"
     st.markdown(f'<div class="cmm-file-state">{state}</div>', unsafe_allow_html=True)
     with st.expander("ⓘ 使用小提示"):
         st.write("健康咨询可以直接提问，无需先填问卷。风险计算需要完整的模型输入字段。")
         st.write("表格中的姓名、原始 ID 等额外列会在上传前移除；请自己保留原表以对应结果行号。")
-        st.caption("附件传递仍在联调，请先使用测试数据。上传成功不等于计算完成。")
+        st.caption("私有文件链接有效15分钟。请先用测试数据验证计算和下载；上传成功不等于计算完成。")
 
 st.markdown('''<div class="cmm-hero"><div><div class="cmm-eyebrow">🌱 个人健康 · 日常管理</div>
-<h1>让健康管理，从今天开始</h1><p>我是您的 CMM 智能助手。<br>一起看懂体检信息，把健康建议变成可以开始的小行动。</p></div>
+<h1>筑梦健康毕节</h1><p>让健康管理，从今天开始。<br>我是您的 CMM 智能助手，陪您一起看懂体检信息，把健康建议变成可以开始的小行动。</p></div>
 <div class="cmm-hero-art">🌿</div></div>''', unsafe_allow_html=True)
 
 suggestion = None
@@ -207,18 +190,19 @@ for message in st.session_state.messages:
 
 st.markdown('<div class="cmm-footer">健康建议用于辅助日常管理，诊疗与用药请遵医嘱。</div>', unsafe_allow_html=True)
 typed_prompt = st.chat_input("聊聊您的健康问题，例如：血压偏高，平时应该注意什么？")
-prompt = typed_prompt or suggestion
+prompt = "请对我刚上传的数据表执行CMM风险计算，并提供本次结果CSV的真实下载链接。" if request_calculation else (typed_prompt or suggestion)
 if prompt:
-    if st.session_state.file_id and not st.session_state.file_ready:
-        st.warning("请先等待附件就绪，或开始新对话进行纯文字咨询。")
-        st.stop()
     api_key = setting("DASHSCOPE_API_KEY")
     app_id = setting("BAILIAN_APP_ID")
     if not api_key or not app_id:
         st.error("请管理员检查现有百炼API Key和应用ID配置。")
         st.stop()
-    file_id = st.session_state.file_id if not st.session_state.file_sent else None
-    body = conversation_body(prompt, st.session_state.session_id, file_id)
+    manifest = st.session_state.file_manifest if request_calculation else None
+    try:
+        body = conversation_body(prompt, st.session_state.session_id, manifest)
+    except InputError as exc:
+        st.warning(str(exc))
+        st.stop()
     headers = {"Authorization": "Bearer " + api_key, "Content-Type": "application/json"}
     if setting("DASHSCOPE_WORKSPACE_ID"):
         headers["X-DashScope-WorkSpace"] = setting("DASHSCOPE_WORKSPACE_ID")
@@ -234,7 +218,8 @@ if prompt:
                     result = json.load(response)
             answer = result["output"].get("text", "服务返回了空回复。")
             st.session_state.session_id = result["output"].get("session_id")
-            st.session_state.file_sent = True
+            if manifest:
+                st.session_state.file_sent = True
             show_answer(answer)
             st.session_state.messages.append({"role": "assistant", "content": answer})
         except urllib.error.HTTPError as exc:
