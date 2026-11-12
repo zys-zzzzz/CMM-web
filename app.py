@@ -114,6 +114,8 @@ def portal_body(prompt, mode, session_id=None, manifest=None, lifestyle=None):
         clean_lifestyle = {}
         if mode == "personal":
             for key, value in (lifestyle or {}).items():
+                if value is None:
+                    continue
                 if key not in LIFESTYLE_OPTIONS or value not in LIFESTYLE_OPTIONS[key]:
                     raise InputError("生活方式选项不正确。")
                 if value != "不补充":
@@ -173,10 +175,20 @@ def upload(data, records):
     return SignedFileClient({key: setting(key) for key in keys}).upload(data, records)
 
 
+def guideline_mcp_settings():
+    url, token = setting("KG_MCP_URL"), setting("KG_MCP_TOKEN")
+    if url or token:
+        return url, token
+    try:
+        return tuple(str(st.secrets.get(key, "")).strip() for key in ("url", "token"))
+    except FileNotFoundError:
+        return "", ""
+
+
 def graph_bundle(data):
     plan = plan_for_csv(data, mode)
     with st.spinner("正在按表单主题读取图谱规则和指南来源…"):
-        bundle = retrieve(plan, setting("KG_MCP_URL"), setting("KG_MCP_TOKEN"))
+        bundle = retrieve(plan, *guideline_mcp_settings())
     return plan, bundle
 
 
@@ -211,19 +223,19 @@ def show_answer(answer):
 st.set_page_config(page_title="CMM 风险评估", page_icon="📋", layout="wide", initial_sidebar_state="auto")
 st.markdown("""<style>
 :root {
-    --cmm-bg:#f3f6fa;
-    --cmm-ink:#17283d;
-    --cmm-muted:#475b73;
-    --cmm-border:#cdd8e5;
-    --cmm-primary:#244c76;
+    --cmm-bg:#f4f5fc;
+    --cmm-ink:#262c4e;
+    --cmm-muted:#515976;
+    --cmm-border:#dce0f2;
+    --cmm-primary:#4e54b5;
 }
 .stApp { background:var(--cmm-bg); color:var(--cmm-ink); }
 .stApp :is(h1,h2,h3,h4,p,label,button,textarea) {
     font-family:"Microsoft YaHei","PingFang SC",sans-serif;
 }
-[data-testid="stHeader"] { background:rgba(243,246,250,.96); }
+[data-testid="stHeader"] { background:rgba(244,245,252,.96); }
 [data-testid="stMainBlockContainer"], .block-container {
-    max-width:1050px; padding-top:3rem; padding-bottom:2rem;
+    max-width:1160px; padding-top:5.5rem; padding-bottom:2rem;
 }
 [data-testid="stSidebar"] { background:#fff; border-right:1px solid var(--cmm-border); }
 .cmm-brand {
@@ -232,37 +244,51 @@ st.markdown("""<style>
 }
 .cmm-logo {
     display:grid; place-items:center; width:42px; height:42px; flex:none;
-    border-radius:9px; background:#193654; color:#fff; font-size:11px; letter-spacing:.04em;
+    border-radius:9px; background:#444aa1; color:#fff; font-size:11px; letter-spacing:.04em;
 }
 .cmm-hero {
-    background:linear-gradient(118deg,#132941 0%,#244a6c 100%);
-    border:1px solid #213e5b; border-radius:16px; padding:29px 34px; margin-bottom:10px;
+    display:flex; align-items:center; justify-content:space-between; gap:24px;
+    background:linear-gradient(115deg,#3444a4 0%,#6150ad 68%,#8170c1 100%);
+    border-radius:26px; padding:28px 36px; margin-bottom:16px;
+    box-shadow:0 12px 34px #3444a41a;
 }
-.cmm-hero h1 { margin:0 0 8px; padding:0; color:#fff; font-size:31px; line-height:1.35; }
-.cmm-hero p { margin:0; color:#e2ebf5; font-size:15px; line-height:1.7; }
+.cmm-hero h1 { margin:0 0 10px; padding:0; color:#fff; font-size:clamp(1.6rem,3vw,2.25rem); line-height:1.35; }
+.cmm-hero p { margin:0; color:#eef0ff; font-size:16px; line-height:1.7; }
+.cmm-hero-art { width:190px; height:152px; flex:none; }
+.cmm-entry {
+    display:flex; flex-direction:column; gap:12px; background:#fff; padding:26px;
+    border:1px solid #dce0f4; border-radius:21px; min-height:210px;
+    box-shadow:0 6px 22px #3346a809;
+}
+.cmm-entry-icon {
+    display:grid; place-items:center; width:38px; height:38px; border-radius:10px;
+    background:#eeeffb; color:#5258b1; font-size:23px;
+}
+.cmm-entry h3 { margin:0; padding:0; color:#2a305e; font-size:1.25rem; }
+.cmm-entry p { margin:0; color:#515976; font-size:15px; line-height:1.8; }
 [data-testid="stForm"] {
     background:#fff; border:1px solid var(--cmm-border);
     border-radius:14px; padding:clamp(12px,3vw,24px);
 }
 [data-testid="stForm"] h4 {
-    color:#274766; border-bottom:1px solid #dce4ed; margin-bottom:8px; padding-bottom:8px;
+    color:#373d80; border-bottom:1px solid #e5e7f5; margin-bottom:8px; padding-bottom:8px;
 }
 [data-testid="stCaptionContainer"] p { color:var(--cmm-muted); line-height:1.6; }
 :is([data-testid="stButton"],[data-testid="stFormSubmitButton"],[data-testid="stDownloadButton"]) button {
     border:1px solid var(--cmm-border); border-radius:8px; min-height:42px;
-    background:#fff; color:#24435f;
+    background:#fff; color:#343a6e;
 }
 :is([data-testid="stButton"],[data-testid="stFormSubmitButton"],[data-testid="stDownloadButton"]) button:hover:not(:disabled) {
-    background:#edf3fa; border-color:#7693b3; color:#173a60;
+    background:#eff0fc; border-color:#858ac8; color:#383e93;
 }
 :is([data-testid="stButton"],[data-testid="stFormSubmitButton"]) button[kind="primary"]:not(:disabled) {
     background:var(--cmm-primary); border-color:var(--cmm-primary); color:#fff;
 }
 :is([data-testid="stButton"],[data-testid="stFormSubmitButton"]) button[kind="primary"]:hover:not(:disabled) {
-    background:#1b3b5e; border-color:#1b3b5e; color:#fff;
+    background:#3f459d; border-color:#3f459d; color:#fff;
 }
 [data-testid="stFileUploaderDropzone"] {
-    background:#fff; border:1px dashed #8ca3bc; border-radius:12px;
+    background:#fff; border:1px dashed #a0a6d1; border-radius:12px;
 }
 [data-testid="stFileUploaderDropzoneInstructions"] > div > span:first-child { font-size:0; }
 [data-testid="stFileUploaderDropzoneInstructions"] > div > span:first-child::after {
@@ -276,29 +302,32 @@ st.markdown("""<style>
     background:#fff; border:1px solid var(--cmm-border); border-radius:12px;
 }
 [data-testid="stChatMessage"] p { line-height:1.75; }
-[data-testid="stChatInput"] { border:1px solid #a7b9cc; border-radius:12px; background:#fff; }
+[data-testid="stChatInput"] { border:1px solid #b9bee1; border-radius:12px; background:#fff; }
 [data-testid="stBottom"] > div { background:var(--cmm-bg); }
 [data-testid="stExpander"] { background:#fff; border-radius:10px; }
 @media(max-width:640px) {
-    [data-testid="stMainBlockContainer"], .block-container { padding:2.3rem 1rem 1rem; }
+    [data-testid="stMainBlockContainer"], .block-container { padding:3.75rem 1rem 1rem; }
     .cmm-hero { padding:21px 18px; border-radius:12px; }
     .cmm-hero h1 { font-size:24px; }
+    .cmm-hero-art { display:none; }
+    .cmm-entry { min-height:0; padding:20px; }
 }
 </style>""", unsafe_allow_html=True)
 
 with st.sidebar:
     st.markdown('<div class="cmm-brand"><span class="cmm-logo" aria-hidden="true">CMM</span><span>风险评估助手</span></div>', unsafe_allow_html=True)
-    selected = st.radio("选择使用入口", ("👤 个人使用", "👥 医务人员群体使用"), key="portal_mode")
-    mode = "personal" if selected.startswith("👤") else "group"
-    state_key = "portal_" + mode
-    if state_key not in st.session_state:
-        st.session_state[state_key] = {"messages": [], "session_id": None, "manifest": None,
-            "file_signature": None, "request_sent": False, "version": 0, "knowledge": None}
-    state = st.session_state[state_key]
-    if st.button("＋  开始新对话并清空本入口", use_container_width=True):
-        state.update(messages=[], session_id=None, manifest=None, file_signature=None,
-            request_sent=False, knowledge=None, version=state["version"] + 1)
-        st.rerun()
+    selected = st.radio("服务入口", ("工作台", "个人评估", "群体评估"), key="assessment_view")
+    mode = {"工作台": "home", "个人评估": "personal", "群体评估": "group"}[selected]
+    if mode != "home":
+        state_key = "portal_" + mode
+        if state_key not in st.session_state:
+            st.session_state[state_key] = {"messages": [], "session_id": None, "manifest": None,
+                "file_signature": None, "request_sent": False, "version": 0, "knowledge": None}
+        state = st.session_state[state_key]
+        if st.button("＋  开始新对话并清空本入口", use_container_width=True):
+            state.update(messages=[], session_id=None, manifest=None, file_signature=None,
+                request_sent=False, knowledge=None, version=state["version"] + 1)
+            st.rerun()
     st.divider()
     st.caption("当前模型仅用于65岁及以上人群，需完整28项数据。风险分类不代替诊断。")
     with st.expander("隐私与使用提示"):
@@ -307,15 +336,42 @@ with st.sidebar:
         st.write("切换入口使用独立对话。清空对话不自动删除OSS或百炼宿主文件。")
         st.caption("请勿在聊天中粘贴患者身份信息。")
 
-title, description = (
-    ("个人风险评估", "填写体检指标，查看个人风险分层与健康管理建议。")
-    if mode == "personal" else
-    ("群体风险评估", "上传体检表，生成逐人评估结果及高风险待复核清单。")
-)
+title, description = {
+    "home": ("CMM 风险评估助手", "面向 65 岁及以上人群，提供个人体检评估与医务人员批量评估。"),
+    "personal": ("个人风险评估", "填写体检指标，查看个人风险分层与健康管理建议。"),
+    "group": ("群体风险评估", "上传体检表，生成逐人评估结果及高风险待复核清单。"),
+}[mode]
+hero_art = """<svg class="cmm-hero-art" viewBox="0 0 240 170" aria-hidden="true">
+<circle cx="125" cy="85" r="74" fill="#ffffff" fill-opacity=".13"/>
+<rect x="75" y="29" width="103" height="125" rx="19" fill="#f7f8ff"/>
+<rect x="98" y="18" width="58" height="23" rx="10" fill="#b9c4ff"/>
+<text x="126" y="82" text-anchor="middle" fill="#4a48a8" font-size="35" font-weight="700">65+</text>
+<path d="M86 108h24l9-18 13 35 10-17h23" stroke="#6875d9" stroke-width="5" fill="none" stroke-linecap="round"/>
+<circle cx="188" cy="125" r="27" fill="#ffb9bd"/><path d="M175 125h26M188 112v26" stroke="#fff" stroke-width="5" stroke-linecap="round"/>
+</svg>"""
 st.markdown(
-    f'<div class="cmm-hero"><h1>{title}</h1><p>{description}</p></div>',
+    f'<div class="cmm-hero"><div><h1>{title}</h1><p>{description}</p></div>{hero_art}</div>',
     unsafe_allow_html=True,
 )
+
+if mode == "home":
+    st.subheader("选择服务入口")
+    cards = (
+        ("个人评估", "♡", "参照个人体检报告填写指标，查看风险分层和健康建议。"),
+        ("群体评估", "▦", "供医务人员批量上传体检表，下载逐人结果和待复核清单。"),
+    )
+    for column, (entry, icon, detail) in zip(st.columns(2, gap="large"), cards):
+        with column:
+            st.markdown(
+                f'<div class="cmm-entry"><span class="cmm-entry-icon" aria-hidden="true">{icon}</span>'
+                f'<h3>{entry}</h3><p>{detail}</p></div>',
+                unsafe_allow_html=True,
+            )
+            st.button(
+                f"进入{entry}", type="primary", use_container_width=True,
+                on_click=st.session_state.__setitem__, args=("assessment_view", entry),
+            )
+    st.stop()
 
 calculation = None
 version = state["version"]
@@ -351,10 +407,11 @@ if mode == "personal":
                                 help=help_text, key=key + "-slider")
             if group == "视力与功能":
                 st.caption("运动功能是功能状态，并非每周运动次数；脉搏和心率均为原模型必需字段。")
-        st.markdown("#### 生活方式补充（可选，仅用于建议）")
+        st.markdown("#### 生活方式")
         lifestyle = {}
         for label, options in LIFESTYLE_OPTIONS.items():
-            lifestyle[label] = st.selectbox(label, options, key=f"lifestyle-{version}-{label}")
+            lifestyle[label] = st.selectbox(label, options[1:], index=None, placeholder="请选择",
+                                            key=f"lifestyle-{version}-{label}")
         confirmed_values = st.checkbox("我已按实际报告逐项核对所有数值，包括没有拖动过的滑块起始值；没有用示例值代替未知检查结果。", key=f"person-values-confirmed-{version}")
         st.caption("提交后，28 项数据经私有 OSS 交由百炼 Skill 计算。百炼将使用本次表单、补充信息及计算结果生成风险解释和建议。")
         submitted = st.form_submit_button("📊 计算我的风险并生成健康建议", type="primary", use_container_width=True)
