@@ -257,7 +257,7 @@ st.markdown("""<style>
 .cmm-hero-art { width:190px; height:152px; flex:none; }
 .cmm-entry {
     display:flex; flex-direction:column; gap:12px; background:#fff; padding:26px;
-    border:1px solid #dce0f4; border-radius:21px; min-height:210px;
+    border:1px solid #dce0f4; border-radius:21px; min-height:190px; margin-bottom:14px;
     box-shadow:0 6px 22px #3346a809;
 }
 .cmm-entry-icon {
