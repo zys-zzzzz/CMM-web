@@ -314,11 +314,16 @@ st.markdown("""<style>
 }
 </style>""", unsafe_allow_html=True)
 
+selected = st.session_state.get("assessment_view", "工作台")
+mode = {"工作台": "home", "个人评估": "personal", "群体评估": "group"}[selected]
+
 with st.sidebar:
     st.markdown('<div class="cmm-brand"><span class="cmm-logo" aria-hidden="true">CMM</span><span>cmm-screen</span></div>', unsafe_allow_html=True)
-    selected = st.radio("服务入口", ("工作台", "个人评估", "群体评估"), key="assessment_view")
-    mode = {"工作台": "home", "个人评估": "personal", "群体评估": "group"}[selected]
     if mode != "home":
+        st.button(
+            "返回工作台", use_container_width=True,
+            on_click=st.session_state.__setitem__, args=("assessment_view", "工作台"),
+        )
         state_key = "portal_" + mode
         if state_key not in st.session_state:
             st.session_state[state_key] = {"messages": [], "session_id": None, "manifest": None,
