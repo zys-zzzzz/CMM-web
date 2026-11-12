@@ -1,4 +1,4 @@
-"""CMM personal form and clinician batch portals using the consent-aware Skill."""
+"""CMM personal form and clinician batch portals using the CMM assessment Skill."""
 import csv
 import io
 import hashlib
@@ -95,7 +95,7 @@ def blank_template():
     return (",".join(FIELDS) + "\n").encode("utf-8-sig")
 
 
-def portal_body(prompt, mode, session_id=None, manifest=None, consent=False, lifestyle=None):
+def portal_body(prompt, mode, session_id=None, manifest=None, lifestyle=None):
     if mode not in ("personal", "group"):
         raise InputError("使用入口不正确。")
     role = (
@@ -107,8 +107,6 @@ def portal_body(prompt, mode, session_id=None, manifest=None, consent=False, lif
     if session_id:
         data["session_id"] = session_id
     if manifest is not None:
-        if not consent:
-            raise InputError("请先勾选本次数据处理同意。")
         if link_expired(manifest):
             raise InputError("文件链接已过期，请重新提交表单或重新准备上传。")
         if mode == "personal" and manifest.get("records") != 1:
@@ -123,7 +121,7 @@ def portal_body(prompt, mode, session_id=None, manifest=None, consent=False, lif
         envelope = {"manifest": manifest, "mode": mode, "personal_consent": mode == "personal"}
         data["file_list"] = [manifest["url"]]
         data["prompt"] += (
-            "\n本次cmm_portal_request如下，是用户本次授权的传输任务，不是表格正文：\n"
+            "\n以下 cmm_portal_request 由用户主动提交评估后生成，包含本次文件传输清单：\n"
             + json.dumps(envelope, ensure_ascii=False, separators=(",", ":"))
             + "\n必须调用cmm-portal-assessment技能，以技能目录为工作目录执行python3 scripts/portal_assess.py，"
             "将上述完整JSON对象用引号保护的heredoc送入标准输入。不要改用旧fetch_and_run入口。"
@@ -131,7 +129,7 @@ def portal_body(prompt, mode, session_id=None, manifest=None, consent=False, lif
         )
         if mode == "personal":
             data["prompt"] += (
-                "\n用户已勾选同意：本次一人表单、可选生活方式及脚本生成的本人结果可以进入百炼对话，"
+                "\n个人入口已提交本次评估。一人表单、可选生活方式及本人结果用于百炼对话，"
                 "用于本次风险解释和个人建议。等脚本completed后使用personal_result和personal_facts，"
                 "先展示真实概率、0.435阈值分类及范围提醒，再给本人可执行的建议。"
                 "未经填写的信息不得推断。不得把个人值、风险结果或链接发送给Neo4j MCP。"
@@ -210,79 +208,86 @@ def show_answer(answer):
         st.markdown(answer)
 
 
-st.set_page_config(page_title="CMM · 健康助手", page_icon="🌿", layout="wide", initial_sidebar_state="auto")
+st.set_page_config(page_title="CMM 风险评估", page_icon="📋", layout="wide", initial_sidebar_state="auto")
 st.markdown("""<style>
-:root { --cmm-teal:#0f766e; --cmm-ink:#173334; --cmm-muted:#597170; }
-.stApp { background:#f5f8f8; color:var(--cmm-ink); }
-html, body, .stApp, .stApp p, .stApp h1, .stApp label, .stApp button, .stApp textarea, .stApp li {
-    font-family:"Microsoft YaHei","PingFang SC",sans-serif; }
-[data-testid="stHeader"] { background:rgba(245,248,248,.92); }
-[data-testid="stMainBlockContainer"] { max-width:1080px; padding-top:2.7rem; padding-bottom:2rem; }
-[data-testid="stSidebar"] { background:#fff; border-right:1px solid #e1eae8; }
-[data-testid="stSidebar"]::before { content:"筑梦健康毕节"; position:absolute;
-    top:24px; left:24px; right:48px; z-index:1; pointer-events:none;
+:root {
+    --cmm-bg:#f3f6fa;
+    --cmm-ink:#17283d;
+    --cmm-muted:#475b73;
+    --cmm-border:#cdd8e5;
+    --cmm-primary:#244c76;
+}
+.stApp { background:var(--cmm-bg); color:var(--cmm-ink); }
+.stApp :is(h1,h2,h3,h4,p,label,button,textarea) {
     font-family:"Microsoft YaHei","PingFang SC",sans-serif;
-    font-size:24px; font-weight:750; line-height:1.4; color:#173f3b; }
-[data-testid="stSidebar"] > div:first-child { padding-top:2rem; }
-.cmm-brand { display:flex; align-items:center; gap:11px; margin:0 0 22px; }
-.cmm-logo { width:44px; height:44px; background:#e4f4ed; border:1px solid #cce6d9;
-    border-radius:14px; display:flex; align-items:center; justify-content:center; font-size:25px; }
-.cmm-brand-name { font-size:20px; font-weight:750; color:#173f3b; line-height:1.35; }
-.cmm-brand-sub { font-size:11px; color:#718782; letter-spacing:1.1px; }
-.cmm-eyebrow { display:inline-block; background:#e5f3ec; color:#25614f; border:1px solid #d4e8dd;
-    font-size:12px; padding:5px 11px; border-radius:20px; margin-bottom:15px; }
-.cmm-hero { background:linear-gradient(115deg,#ecf7f1 0%,#f1f8f6 62%,#e8f2f4 100%);
-    border:1px solid #dceae2; border-radius:24px; padding:30px 34px; margin-bottom:23px;
-    display:flex; justify-content:space-between; align-items:center; gap:20px; }
-.cmm-hero h1 { color:#164d44; font-size:32px; line-height:1.35; margin:0 0 10px; padding:0; font-weight:750; letter-spacing:-.6px; }
-.cmm-hero p { color:#526e65; font-size:15px; line-height:1.8; margin:0; }
-.cmm-hero-art { flex-shrink:0; width:106px; height:106px; border-radius:32px;
-    background:rgba(255,255,255,.75); border:1px solid rgba(255,255,255,.95);
-    display:flex; justify-content:center; align-items:center; font-size:57px; transform:rotate(-5deg); }
-.cmm-card { background:#fff; border:1px solid #e2eae7; border-radius:17px; padding:20px; min-height:148px; margin:0 0 16px; }
-.cmm-card-icon { font-size:24px; margin-bottom:9px; }
-.cmm-card-title { color:#234c42; font-size:16px; font-weight:700; margin-bottom:7px; }
-.cmm-card-text { font-size:13px; color:#657b74; line-height:1.7; }
-.cmm-section { color:#294d45; font-size:16px; font-weight:700; margin:12px 0 8px; }
-.cmm-intro { color:#60766f; font-size:14px; margin-bottom:11px; line-height:1.8; }
-.cmm-side-title { color:#294d45; font-size:15px; font-weight:700; margin:12px 0 7px; }
-.cmm-side-note { color:#6a8079; font-size:12px; line-height:1.8; margin-bottom:9px; }
-.cmm-file-state { border:1px solid #e1e9e5; border-radius:12px; background:#f5f9f7;
-    color:#526f62; font-size:12px; padding:11px 13px; line-height:1.8; margin:12px 0; }
-.cmm-footer { font-size:12px; color:#71857e; text-align:center; padding:17px 0 3px; }
-[data-testid="stButton"] button { border-radius:11px; border:1px solid #d7e5de;
-    background:#fff; color:#285b4e; min-height:42px; font-size:14px; transition:all .16s ease; }
-[data-testid="stButton"] button:hover { border-color:#75b5a0; background:#f0f8f4; color:#0c6551; }
-[data-testid="stButton"] button[kind="primary"] { background:#187968; color:white; border-color:#187968; }
-[data-testid="stButton"] button[kind="primary"]:hover { background:#116554; color:white; }
-[data-testid="stButton"] button:disabled { color:#6e817a; background:#edf3ef; border-color:#e1e9e4; opacity:.75; }
-[data-testid="stFileUploader"] { background:#f7faf8; border:1px dashed #bfd7ca; border-radius:14px; padding:5px; }
-[data-testid="stFileUploaderDropzone"] { background:transparent; }
-[data-testid="stFileUploaderDropzoneInstructions"] > div > span { font-size:0; }
-[data-testid="stFileUploaderDropzoneInstructions"] > div > span:first-child::after { content:"拖入体检表，或点击选择文件"; font-size:13px; }
-[data-testid="stFileUploaderDropzoneInstructions"] > div > span:nth-child(2)::after { content:"CSV / XLSX · 处理上限 5 MiB"; font-size:11px; }
+}
+[data-testid="stHeader"] { background:rgba(243,246,250,.96); }
+[data-testid="stMainBlockContainer"], .block-container {
+    max-width:1050px; padding-top:3rem; padding-bottom:2rem;
+}
+[data-testid="stSidebar"] { background:#fff; border-right:1px solid var(--cmm-border); }
+.cmm-brand {
+    display:flex; align-items:center; gap:11px; margin-bottom:14px;
+    color:var(--cmm-ink); font-size:17px; font-weight:700;
+}
+.cmm-logo {
+    display:grid; place-items:center; width:42px; height:42px; flex:none;
+    border-radius:9px; background:#193654; color:#fff; font-size:11px; letter-spacing:.04em;
+}
+.cmm-hero {
+    background:linear-gradient(118deg,#132941 0%,#244a6c 100%);
+    border:1px solid #213e5b; border-radius:16px; padding:29px 34px; margin-bottom:10px;
+}
+.cmm-hero h1 { margin:0 0 8px; padding:0; color:#fff; font-size:31px; line-height:1.35; }
+.cmm-hero p { margin:0; color:#e2ebf5; font-size:15px; line-height:1.7; }
+[data-testid="stForm"] {
+    background:#fff; border:1px solid var(--cmm-border);
+    border-radius:14px; padding:clamp(12px,3vw,24px);
+}
+[data-testid="stForm"] h4 {
+    color:#274766; border-bottom:1px solid #dce4ed; margin-bottom:8px; padding-bottom:8px;
+}
+[data-testid="stCaptionContainer"] p { color:var(--cmm-muted); line-height:1.6; }
+:is([data-testid="stButton"],[data-testid="stFormSubmitButton"],[data-testid="stDownloadButton"]) button {
+    border:1px solid var(--cmm-border); border-radius:8px; min-height:42px;
+    background:#fff; color:#24435f;
+}
+:is([data-testid="stButton"],[data-testid="stFormSubmitButton"],[data-testid="stDownloadButton"]) button:hover:not(:disabled) {
+    background:#edf3fa; border-color:#7693b3; color:#173a60;
+}
+:is([data-testid="stButton"],[data-testid="stFormSubmitButton"]) button[kind="primary"]:not(:disabled) {
+    background:var(--cmm-primary); border-color:var(--cmm-primary); color:#fff;
+}
+:is([data-testid="stButton"],[data-testid="stFormSubmitButton"]) button[kind="primary"]:hover:not(:disabled) {
+    background:#1b3b5e; border-color:#1b3b5e; color:#fff;
+}
+[data-testid="stFileUploaderDropzone"] {
+    background:#fff; border:1px dashed #8ca3bc; border-radius:12px;
+}
+[data-testid="stFileUploaderDropzoneInstructions"] > div > span:first-child { font-size:0; }
+[data-testid="stFileUploaderDropzoneInstructions"] > div > span:first-child::after {
+    content:"拖入体检表，或点击选择文件"; font-size:14px;
+}
 [data-testid="stFileUploaderDropzoneInstructions"] small { font-size:0; }
-[data-testid="stFileUploaderDropzoneInstructions"] small::after { content:"CSV / XLSX · 处理上限 5 MiB"; font-size:11px; }
+[data-testid="stFileUploaderDropzoneInstructions"] small::after { content:"CSV / XLSX"; font-size:12px; }
 [data-testid="stFileUploaderDropzone"] button { font-size:0; }
-[data-testid="stFileUploaderDropzone"] button::after { content:"选择文件"; font-size:13px; }
-[data-testid="stChatMessage"] { background:#fff; border:1px solid #e1eae5;
-    border-radius:17px; padding:20px; margin-bottom:14px; line-height:1.8; }
-[data-testid="stChatMessage"] p { line-height:1.85; }
-[data-testid="stChatInput"] { border-radius:16px; border:1px solid #ccded3; background:#fff; }
-[data-testid="stBottom"] > div { background:#f5f8f8; }
-[data-testid="stAlert"] { border-radius:12px; }
-[data-testid="stExpander"] { background:#fff; border-radius:12px; }
+[data-testid="stFileUploaderDropzone"] button::after { content:"选择文件"; font-size:14px; }
+[data-testid="stChatMessage"] {
+    background:#fff; border:1px solid var(--cmm-border); border-radius:12px;
+}
+[data-testid="stChatMessage"] p { line-height:1.75; }
+[data-testid="stChatInput"] { border:1px solid #a7b9cc; border-radius:12px; background:#fff; }
+[data-testid="stBottom"] > div { background:var(--cmm-bg); }
+[data-testid="stExpander"] { background:#fff; border-radius:10px; }
 @media(max-width:640px) {
-    [data-testid="stMainBlockContainer"] { padding:1.4rem 1rem 1rem; }
-    .cmm-hero { padding:24px 21px; border-radius:18px; }
-    .cmm-hero h1 { font-size:25px; }
-    .cmm-hero-art { display:none; }
-    .cmm-card { display:none; }
+    [data-testid="stMainBlockContainer"], .block-container { padding:2.3rem 1rem 1rem; }
+    .cmm-hero { padding:21px 18px; border-radius:12px; }
+    .cmm-hero h1 { font-size:24px; }
 }
 </style>""", unsafe_allow_html=True)
 
 with st.sidebar:
-    st.markdown('<div class="cmm-brand"><div class="cmm-logo">🌿</div><div><div class="cmm-brand-name">CMM 健康助手</div><div class="cmm-brand-sub">PERSONAL HEALTH COMPANION</div></div></div>', unsafe_allow_html=True)
+    st.markdown('<div class="cmm-brand"><span class="cmm-logo" aria-hidden="true">CMM</span><span>风险评估助手</span></div>', unsafe_allow_html=True)
     selected = st.radio("选择使用入口", ("👤 个人使用", "👥 医务人员群体使用"), key="portal_mode")
     mode = "personal" if selected.startswith("👤") else "group"
     state_key = "portal_" + mode
@@ -295,23 +300,26 @@ with st.sidebar:
             request_sent=False, knowledge=None, version=state["version"] + 1)
         st.rerun()
     st.divider()
-    st.caption("个人入口：填写表单 → 同意处理 → 计算与个人建议。" if mode == "personal" else
-        "群体入口：上传数据表 → 逐人结果 → 高风险待复核与随访清单。")
     st.caption("当前模型仅用于65岁及以上人群，需完整28项数据。风险分类不代替诊断。")
     with st.expander("隐私与使用提示"):
-        st.write("个人版：提交前需同意将本次表单和本人计算结果用于百炼对话及个人建议。不收集姓名、身份证或电话。")
+        st.write("个人版：提交评估后，本次表单及计算结果用于百炼风险解释和个人建议。请勿在表单或对话中填写身份信息。")
         st.write("群体版：原始记录与逐人结果保留在文件处理链路中；对话只展示人群汇总，名单交医务人员下载。")
         st.write("切换入口使用独立对话。清空对话不自动删除OSS或百炼宿主文件。")
         st.caption("请勿在聊天中粘贴患者身份信息。")
 
-st.markdown('''<div class="cmm-hero"><div><div class="cmm-eyebrow">🌱 个人健康 · 日常管理</div>
-<h1>让健康管理，从今天开始</h1><p>我是您的 CMM 智能助手。<br>一起看懂体检信息，把健康建议变成可以开始的小行动。</p></div>
-<div class="cmm-hero-art">🌿</div></div>''', unsafe_allow_html=True)
+title, description = (
+    ("个人风险评估", "填写体检指标，查看个人风险分层与健康管理建议。")
+    if mode == "personal" else
+    ("群体风险评估", "上传体检表，生成逐人评估结果及高风险待复核清单。")
+)
+st.markdown(
+    f'<div class="cmm-hero"><h1>{title}</h1><p>{description}</p></div>',
+    unsafe_allow_html=True,
+)
 
 calculation = None
 version = state["version"]
 if mode == "personal":
-    st.subheader("👤 个人风险评估")
     st.write("请参照近期体检报告填写。完成后一次提交，获取本人的风险结果和健康建议。")
     st.info("拖动滑块填写数值，性别与疾病史点击选择。起始值只是操作示例，不是您的检查结果；请按报告逐项核对，没有结果时不要猜填。")
     st.caption("滑块范围仅用于录入，不是医学正常范围。真实数值超出范围或需要更高精度时，请切换精确输入，不要硬填到端点。")
@@ -348,13 +356,11 @@ if mode == "personal":
         for label, options in LIFESTYLE_OPTIONS.items():
             lifestyle[label] = st.selectbox(label, options, key=f"lifestyle-{version}-{label}")
         confirmed_values = st.checkbox("我已按实际报告逐项核对所有数值，包括没有拖动过的滑块起始值；没有用示例值代替未知检查结果。", key=f"person-values-confirmed-{version}")
-        consent = st.checkbox("我同意将本次28项表单数据经私有OSS交给百炼Skill计算，并将本人表单、补充信息及计算结果提供给百炼模型，用于本次风险解释和个人健康建议。", key=f"person-consent-{version}")
+        st.caption("提交后，28 项数据经私有 OSS 交由百炼 Skill 计算。百炼将使用本次表单、补充信息及计算结果生成风险解释和建议。")
         submitted = st.form_submit_button("📊 计算我的风险并生成健康建议", type="primary", use_container_width=True)
     if submitted:
         try:
             state["manifest"] = None
-            if not consent:
-                raise InputError("请先阅读并勾选本次数据处理同意，未同意不会上传或发起计算。")
             if not confirmed_values:
                 raise InputError("请先按实际报告核对所有数值并勾选确认，不能直接用滑块示例值计算。")
             require_api()
@@ -369,8 +375,6 @@ if mode == "personal":
         except Exception:
             st.error("表单准备未完成，本次没有确认计算成功。请检查配置后重新提交。")
 else:
-    st.subheader("👥 医务人员群体评估")
-    st.write("上传多人数据，获取每人的模型风险及高风险待随访清单。对话汇总面向医务人员，不向模型展示患者名单。")
     st.download_button("⬇ 下载28字段空白CSV模板", blank_template(), "CMM输入模板.csv", "text/csv", key="group-template")
     uploaded = st.file_uploader("上传体检数据表（CSV / XLSX，最大5MiB、10000条）", type=["csv", "xlsx"], key=f"group-upload-{version}")
     sheet = None
@@ -384,14 +388,14 @@ else:
     signature = (hashlib.sha256(uploaded.getvalue()).hexdigest(), sheet) if uploaded is not None else None
     if signature != state["file_signature"]:
         state.update(manifest=None, file_signature=signature, request_sent=False)
-    consent = st.checkbox("我已取得本次数据处理授权，同意将表格中28项模型数据经私有OSS交给百炼Skill计算；逐人结果仅以文件交付，对话仅接收群体统计。", key=f"group-consent-{version}")
+    st.caption("请上传已获处理授权的数据。点击准备并上传后，所需字段经私有 OSS 交由百炼 Skill 计算。逐人结果通过文件交付，对话使用群体统计。")
     columns = st.columns(2)
     with columns[0]:
         prepare = st.button("↑ 准备并上传", type="primary", use_container_width=True,
-            disabled=uploaded is None or not excel_ok or not consent)
+            disabled=uploaded is None or not excel_ok)
     with columns[1]:
         calculate = st.button("▶ 开始群体风险评估", use_container_width=True,
-            disabled=not consent or state["manifest"] is None or state["request_sent"] or prepare)
+            disabled=state["manifest"] is None or state["request_sent"] or prepare)
     if prepare:
         state.update(manifest=None, request_sent=False)
         try:
@@ -418,9 +422,9 @@ if calculation:
     state.update(messages=[], session_id=None, knowledge=calculation["knowledge"])
 show_knowledge(state.get("knowledge"))
 st.divider()
-st.subheader("💬 个人结果与健康咨询" if mode == "personal" else "💬 群体结果与管理建议")
+st.subheader("个人结果与健康咨询" if mode == "personal" else "群体结果与管理建议")
 for message in state["messages"]:
-    with st.chat_message(message["role"], avatar="🌿" if message["role"] == "assistant" else "👤"):
+    with st.chat_message(message["role"], avatar="📋" if message["role"] == "assistant" else "👤"):
         show_answer(message["content"]) if message["role"] == "assistant" else st.markdown(message["content"])
 typed = st.chat_input("也可以直接咨询健康管理问题" if mode == "personal" else "咨询群体管理、复核或随访工作")
 prompt = calculation["prompt"] if calculation else typed
@@ -429,7 +433,7 @@ if prompt:
         require_api()
         body = portal_body(prompt, mode, state["session_id"],
             manifest=calculation["manifest"] if calculation else None,
-            consent=calculation is not None, lifestyle=calculation["lifestyle"] if calculation else None)
+            lifestyle=calculation["lifestyle"] if calculation else None)
         if calculation:
             body["input"]["prompt"] += evidence_prompt(calculation["plan"], calculation["knowledge"], mode)
         # New calculations start independent sessions, preventing previous-person results from mixing.
@@ -444,7 +448,7 @@ if prompt:
         state["messages"].append({"role": "user", "content": prompt})
         with st.chat_message("user", avatar="👤"):
             st.markdown(prompt)
-        with st.chat_message("assistant", avatar="🌿"):
+        with st.chat_message("assistant", avatar="📋"):
             with st.spinner("正在计算并整理建议，请勿重复提交…"):
                 with urllib.request.urlopen(req, timeout=300) as response:
                     result = json.load(response)
