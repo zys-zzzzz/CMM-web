@@ -220,7 +220,7 @@ def show_answer(answer):
         st.markdown(answer)
 
 
-st.set_page_config(page_title="CMM 风险评估", page_icon="📋", layout="wide", initial_sidebar_state="auto")
+st.set_page_config(page_title="cmm-screen", page_icon="📋", layout="wide", initial_sidebar_state="auto")
 st.markdown("""<style>
 :root {
     --cmm-bg:#f4f5fc;
@@ -315,7 +315,7 @@ st.markdown("""<style>
 </style>""", unsafe_allow_html=True)
 
 with st.sidebar:
-    st.markdown('<div class="cmm-brand"><span class="cmm-logo" aria-hidden="true">CMM</span><span>风险评估助手</span></div>', unsafe_allow_html=True)
+    st.markdown('<div class="cmm-brand"><span class="cmm-logo" aria-hidden="true">CMM</span><span>cmm-screen</span></div>', unsafe_allow_html=True)
     selected = st.radio("服务入口", ("工作台", "个人评估", "群体评估"), key="assessment_view")
     mode = {"工作台": "home", "个人评估": "personal", "群体评估": "group"}[selected]
     if mode != "home":
@@ -337,7 +337,7 @@ with st.sidebar:
         st.caption("请勿在聊天中粘贴患者身份信息。")
 
 title, description = {
-    "home": ("CMM 风险评估助手", "面向 65 岁及以上人群，提供个人体检评估与医务人员批量评估。"),
+    "home": ("cmm-screen", "老年心血管代谢性共病风险分层与健康管理助手"),
     "personal": ("个人风险评估", "填写体检指标，查看个人风险分层与健康管理建议。"),
     "group": ("群体风险评估", "上传体检表，生成逐人评估结果及高风险待复核清单。"),
 }[mode]
