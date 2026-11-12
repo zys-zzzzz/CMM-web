@@ -220,7 +220,7 @@ def show_answer(answer):
         st.markdown(answer)
 
 
-st.set_page_config(page_title="cmm-screen", page_icon="📋", layout="wide", initial_sidebar_state="auto")
+st.set_page_config(page_title="CMM-SCREEN", page_icon="📋", layout="wide", initial_sidebar_state="auto")
 st.markdown("""<style>
 :root {
     --cmm-bg:#f4f5fc;
@@ -241,6 +241,10 @@ st.markdown("""<style>
 .cmm-brand {
     display:flex; align-items:center; gap:11px; margin-bottom:14px;
     color:var(--cmm-ink); font-size:17px; font-weight:700;
+}
+.cmm-brand-caption {
+    color:var(--cmm-muted); font-size:12px; font-weight:400;
+    line-height:1.55; margin-top:4px;
 }
 .cmm-logo {
     display:grid; place-items:center; width:42px; height:42px; flex:none;
@@ -318,7 +322,7 @@ selected = st.session_state.get("assessment_view", "工作台")
 mode = {"工作台": "home", "个人评估": "personal", "群体评估": "group"}[selected]
 
 with st.sidebar:
-    st.markdown('<div class="cmm-brand"><span class="cmm-logo" aria-hidden="true">CMM</span><span>cmm-screen</span></div>', unsafe_allow_html=True)
+    st.markdown('<div class="cmm-brand"><span class="cmm-logo" aria-hidden="true">CMM</span><div><div>CMM-SCREEN</div><div class="cmm-brand-caption">老年心血管代谢性共病风险分层与健康管理助手</div></div></div>', unsafe_allow_html=True)
     if mode != "home":
         st.button(
             "返回工作台", use_container_width=True,
@@ -342,7 +346,7 @@ with st.sidebar:
         st.caption("请勿在聊天中粘贴患者身份信息。")
 
 title, description = {
-    "home": ("cmm-screen", "老年心血管代谢性共病风险分层与健康管理助手"),
+    "home": ("CMM-SCREEN", "老年心血管代谢性共病风险分层与健康管理助手"),
     "personal": ("个人风险评估", "填写体检指标，查看个人风险分层与健康管理建议。"),
     "group": ("群体风险评估", "上传体检表，生成逐人评估结果及高风险待复核清单。"),
 }[mode]
